@@ -1,0 +1,128 @@
+let faceMesh;
+let options = { maxFaces: 1, refineLandmarks: false, flipped: false };
+
+function preload() {
+    faceMesh = ml5.faceMesh(options);
+}
+
+let video;
+let faces = [];
+let scanningActive = true;
+let scanDuration = 2000; // Scanning effect lasts 2 seconds
+let scanStartTime;
+let detectionTimer = 0;
+
+function setup() {
+    createCanvas(640, 480);
+    video = createCapture(VIDEO);
+    video.size(640, 480);
+    video.hide();
+    faceMesh.detectStart(video, gotFaces);
+    scanStartTime = millis(); // Start the scanning effect timer
+}
+
+function gotFaces(results) {
+    faces = results;
+}
+
+function draw() {
+    image(video, 0, 0, width, height);
+
+    let darkCircleDetectedThisFrame = false;
+
+    for (let i = 0; i < faces.length; i++) {
+        let face = faces[i];
+
+        if (scanningActive) {
+            animateScanningEffect(face); // Scanning effect during first 2 seconds
+        } else {
+            let leftDetected = detectUnderEyeRegion(face, [130, 131, 132, 133], "Left Eye");
+            let rightDetected = detectUnderEyeRegion(face, [359, 360, 361, 362], "Right Eye");
+
+            if (leftDetected || rightDetected) {
+                darkCircleDetectedThisFrame = true;
+                detectionTimer = millis(); 
+            }
+        }
+    }
+
+    // Toggle scanning effect off after 2 seconds
+    if (millis() - scanStartTime > scanDuration) {
+        scanningActive = false;
+    }
+}
+
+// -----------------------------------------------
+// Scanning Effect — Moving landmarks
+function animateScanningEffect(face) {
+    for (let j = 0; j < face.keypoints.length; j++) {
+        let keypoint = face.keypoints[j];
+        let offsetX = sin(frameCount * 0.1 + j * 0.2) * 5; // Oscillating effect
+        let offsetY = cos(frameCount * 0.1 + j * 0.2) * 5;
+
+        fill(0, 200, 255); // Scanning blue
+        noStroke();
+        circle(keypoint.x + offsetX, keypoint.y + offsetY, 5);
+    }
+}
+
+// -----------------------------------------------
+// Under-eye detection with classification
+function detectUnderEyeRegion(face, eyeBagPoints, label) {
+    const DARKNESS_THRESHOLD = 50;
+
+    fill(255, 0, 0); 
+    let darknessLevel = analyzeDarkness(eyeBagPoints, face);
+
+    let alertBoxX = face.keypoints[eyeBagPoints[0]].x - 20;
+    let alertBoxY = face.keypoints[eyeBagPoints[0]].y - 20;
+
+    if (darknessLevel > DARKNESS_THRESHOLD) {
+        noFill();
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        rect(alertBoxX, alertBoxY, 70, 40);
+
+        textSize(16);
+        fill(255, 0, 0);
+
+        // Classify dark circles based on intensity
+        let darkCircleType = classifyDarkCircles(darknessLevel);
+        text(`${label}: ${darkCircleType}`, alertBoxX, alertBoxY - 5);
+
+        return true;
+    }
+
+    return false;
+}
+
+// -----------------------------------------------
+// Classify dark circles based on intensity
+function classifyDarkCircles(darknessLevel) {
+    if (darknessLevel >= 90) {
+        return "Puffy";
+    } else if (darknessLevel >= 70) {
+        return "Hollow";
+    } else {
+        return "Discolored";
+    }
+}
+
+// -----------------------------------------------
+// Function to analyze pixel brightness
+function analyzeDarkness(keypoints, face) {
+    let totalBrightness = 0;
+
+    for (let idx of keypoints) {
+        let kp = face.keypoints[idx];
+        let c = get(kp.x, kp.y); 
+        let brightnessValue = (red(c) + green(c) + blue(c)) / 3;
+        totalBrightness += brightnessValue;
+
+        fill(255, 0, 0);
+        circle(kp.x, kp.y, 5); // Always show under-eye points
+    }
+
+    let averageBrightness = totalBrightness / keypoints.length;
+    return 255 - averageBrightness;
+}
