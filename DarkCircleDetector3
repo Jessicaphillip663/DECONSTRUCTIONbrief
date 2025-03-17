@@ -1,0 +1,177 @@
+let faceMesh;
+let options = { maxFaces: 1, refineLandmarks: false, flipped: false };
+
+function preload() {
+    faceMesh = ml5.faceMesh(options);
+}
+
+let video;
+let faces = [];
+let scanningActive = true;
+let scanDuration = 2000; // Scanning effect lasts 2 seconds
+let scanStartTime;
+let detectionTimer = 0;
+
+function setup() {
+    createCanvas(640, 480);
+    video = createCapture(VIDEO);
+    video.size(640, 480);
+    video.hide();
+    faceMesh.detectStart(video, gotFaces);
+    scanStartTime = millis(); // Start the scanning effect timer
+}
+
+function gotFaces(results) {
+    faces = results;
+}
+
+function draw() {
+    image(video, 0, 0, width, height);
+
+    let darkCircleDetectedThisFrame = false;
+
+    for (let i = 0; i < faces.length; i++) {
+        let face = faces[i];
+
+        if (scanningActive) {
+            animateScanningEffect(face); // Scanning effect during first 2 seconds
+        } else {
+            let leftDetected = detectUnderEyeRegion(face, [130, 131, 132, 133], "Left Eye");
+            let rightDetected = detectUnderEyeRegion(face, [359, 360, 361, 362], "Right Eye");
+
+            if (leftDetected || rightDetected) {
+                darkCircleDetectedThisFrame = true;
+                detectionTimer = millis();
+            }
+        }
+    }
+
+    if (millis() - scanStartTime > scanDuration) {
+        scanningActive = false;
+    }
+}
+
+// -----------------------------------------------
+// Scanning Effect — Moving landmarks
+function animateScanningEffect(face) {
+    for (let j = 0; j < face.keypoints.length; j++) {
+        let keypoint = face.keypoints[j];
+        let offsetX = sin(frameCount * 0.1 + j * 0.2) * 5;
+        let offsetY = cos(frameCount * 0.1 + j * 0.2) * 5;
+
+        fill(0, 200, 255); // Scanning blue
+        noStroke();
+        circle(keypoint.x + offsetX, keypoint.y + offsetY, 5);
+    }
+}
+
+// -----------------------------------------------
+// Under-eye detection with classification + confidence score
+function detectUnderEyeRegion(face, eyeBagPoints, label) {
+    const DARKNESS_THRESHOLD = 50;
+
+    let darknessLevel = analyzeDarkness(eyeBagPoints, face);
+    let confidenceScore = map(darknessLevel, 50, 100, 50, 100); // Map darkness to a confidence score
+    confidenceScore = constrain(confidenceScore, 0, 100);
+
+    let alertBoxX = face.keypoints[eyeBagPoints[0]].x - 20;
+    let alertBoxY = face.keypoints[eyeBagPoints[0]].y - 20;
+
+    if (darknessLevel > DARKNESS_THRESHOLD) {
+        noFill();
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        rect(alertBoxX, alertBoxY, 70, 40);
+
+        textSize(16);
+
+        // Confidence color coding
+        if (confidenceScore >= 80) fill(0, 255, 0);  // Green (high confidence)
+        else if (confidenceScore >= 60) fill(255, 255, 0); // Yellow (medium confidence)
+        else fill(255, 0, 0); // Red (low confidence)
+
+        let darkCircleType = classifyDarkCircles(darknessLevel);
+        text(`${label}: ${darkCircleType} (${confidenceScore.toFixed(1)}%)`, alertBoxX, alertBoxY - 5);
+
+        return true;
+    }
+
+    return false;
+}
+
+// -----------------------------------------------
+// Classify dark circles based on intensity
+function classifyDarkCircles(darknessLevel, avgFaceBrightness) {
+    const normalizedDarkness = darknessLevel - avgFaceBrightness;
+
+    if (normalizedDarkness >= 40) {
+        return "Puffy";
+    } else if (normalizedDarkness >= 25) {
+        return "Hollow";
+    } else {
+        return "Discolored";
+    }
+}
+
+// -----------------------------------------------
+// Updated Darkness Analysis for Better Accuracy
+function analyzeDarkness(keypoints, face) {
+    let totalBrightness = 0;
+    let faceTotalBrightness = 0;
+
+    // Measure under-eye brightness
+    for (let idx of keypoints) {
+        let kp = face.keypoints[idx];
+        let c = get(kp.x, kp.y);
+        let brightnessValue = (red(c) + green(c) + blue(c)) / 3;
+        totalBrightness += brightnessValue;
+    }
+
+    // Measure overall face brightness for dynamic adjustment
+    for (let kp of face.keypoints) {
+        let c = get(kp.x, kp.y);
+        let brightnessValue = (red(c) + green(c) + blue(c)) / 3;
+        faceTotalBrightness += brightnessValue;
+    }
+
+    let avgBrightness = totalBrightness / keypoints.length;
+    let avgFaceBrightness = faceTotalBrightness / face.keypoints.length;
+
+    return { underEyeBrightness: 255 - avgBrightness, avgFaceBrightness: avgFaceBrightness };
+}
+
+// -----------------------------------------------
+// Detect Under-Eye with Improved Classification Logic
+function detectUnderEyeRegion(face, eyeBagPoints, label) {
+    const DARKNESS_THRESHOLD = 25; // Lowered for better sensitivity
+
+    let { underEyeBrightness, avgFaceBrightness } = analyzeDarkness(eyeBagPoints, face);
+    let darknessLevel = underEyeBrightness;
+
+    let confidenceScore = map(darknessLevel, 30, 100, 50, 100);
+    confidenceScore = constrain(confidenceScore, 0, 100);
+
+    let alertBoxX = face.keypoints[eyeBagPoints[0]].x - 20;
+    let alertBoxY = face.keypoints[eyeBagPoints[0]].y - 20;
+
+    if (darknessLevel > DARKNESS_THRESHOLD) {
+        noFill();
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        rect(alertBoxX, alertBoxY, 70, 40);
+
+        textSize(16);
+
+        // Confidence color coding
+        if (confidenceScore >= 80) fill(0, 255, 0);  // Green (high confidence)
+        else if (confidenceScore >= 60) fill(255, 255, 0); // Yellow (medium confidence)
+        else fill(255, 0, 0); // Red (low confidence)
+
+        let darkCircleType = classifyDarkCircles(darknessLevel, avgFaceBrightness);
+        text(`${label}: ${darkCircleType} (${confidenceScore.toFixed(1)}%)`, alertBoxX, alertBoxY - 5);
+
+        return true;
+    }
+
+    return false;
+}
