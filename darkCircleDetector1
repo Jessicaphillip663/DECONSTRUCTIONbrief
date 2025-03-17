@@ -1,0 +1,105 @@
+let faceMesh; 
+let options = { maxFaces: 1, refineLandmarks: false, flipped: false };
+
+function preload() {
+  faceMesh = ml5.faceMesh(options);
+}
+
+let video;
+let faces = []; 
+let darkCirclesDetected = false; 
+let detectionTimer = 0; // Timer for delay feature
+
+function setup() {
+  createCanvas(640, 480);
+  video = createCapture(VIDEO);
+  video.size(640, 480);
+  video.hide();
+  faceMesh.detectStart(video, gotFaces);
+}
+
+function gotFaces(results) {
+  faces = results;
+}
+
+function draw() {
+  image(video, 0, 0, width, height);
+
+  let darkCircleDetectedThisFrame = false; // Tracks current frame detection
+
+  for (let i = 0; i < faces.length; i++) {
+    let face = faces[i];
+
+    // Draw under-eye points and analyze
+    let leftDetected = drawUnderEyeRegion(face, [130, 131, 132, 133]);
+    let rightDetected = drawUnderEyeRegion(face, [359, 360, 361, 362]);
+
+    if (leftDetected || rightDetected) {
+      darkCircleDetectedThisFrame = true;
+      detectionTimer = millis(); // Reset timer on detection
+    }
+
+    // Show full face landmarks only if no recent dark circles detected
+    if (!darkCirclesDetected) {
+      for (let j = 0; j < face.keypoints.length; j++) {
+        let keypoint = face.keypoints[j];
+        fill(0, 255, 0);
+        noStroke();
+        circle(keypoint.x, keypoint.y, 5);
+      }
+    }
+  }
+
+  // Delay feature — Keep landmarks hidden for 3 seconds after detection
+  if (millis() - detectionTimer < 3000) {
+    darkCirclesDetected = true;
+  } else {
+    darkCirclesDetected = false;
+  }
+}
+
+// -----------------------------------------------
+// Custom function to analyze the under-eye region
+function drawUnderEyeRegion(face, eyeBagPoints) {
+  const DARKNESS_THRESHOLD = 40; // Tuned threshold for better accuracy
+
+  fill(255, 0, 0); // Red for marking dark circle zones
+  let darknessLevel = analyzeDarkness(eyeBagPoints, face);
+
+  let alertBoxX = face.keypoints[eyeBagPoints[0]].x - 20;
+  let alertBoxY = face.keypoints[eyeBagPoints[0]].y - 20;
+
+  if (darknessLevel > DARKNESS_THRESHOLD) {
+    noFill();
+    stroke(255, 0, 0);
+    strokeWeight(3);
+    rect(alertBoxX, alertBoxY, 70, 40); // Visual alert (red box)
+    
+    textSize(16);
+    fill(255, 0, 0);
+    text("Dark Circles Detected", alertBoxX, alertBoxY - 5);
+
+    return true;
+  }
+
+  return false;
+}
+
+// -----------------------------------------------
+// Function to analyze pixel brightness
+function analyzeDarkness(keypoints, face) {
+  let totalBrightness = 0;
+
+  for (let idx of keypoints) {
+    let kp = face.keypoints[idx];
+    let c = get(kp.x, kp.y); 
+    let brightnessValue = (red(c) + green(c) + blue(c)) / 3;
+    totalBrightness += brightnessValue;
+
+    fill(255, 0, 0);
+    circle(kp.x, kp.y, 5); // Always show under-eye points
+  }
+
+  let averageBrightness = totalBrightness / keypoints.length;
+  return 255 - averageBrightness;
+}
